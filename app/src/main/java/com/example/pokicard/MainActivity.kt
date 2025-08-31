@@ -3,23 +3,30 @@ package com.example.pokicard
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import androidx.activity.enableEdgeToEdge
+import android.widget.SearchView
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.example.pokemonapp.databinding.ActivityMainBinding
+import com.example.pokicard.data.PokemonResult
 import com.example.pokicard.ui.adapter.PokemonAdapter
 import com.example.pokicard.ui.adapter.PokemonDetailActivity
 import com.example.pokicard.viewmodel.MainViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
 
     private lateinit var viewModel: MainViewModel
     private lateinit var pokemonAdapter: PokemonAdapter
     private lateinit var binding: ActivityMainBinding
+    private var fullpokimonlist: List<PokemonResult> = emptyList()
+
+    private var searchJob: Job? = null
+    private val DEBOUNCE_DELAY = 500L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -30,6 +37,11 @@ class MainActivity : AppCompatActivity() {
 
         setupRecyclerView()
         observeViewModel()
+        setupSearchView()
+
+        binding.searchButton.setOnClickListener {
+            performSearch()
+        }
 
         binding.swipeRefreshLayout.setOnRefreshListener {
             viewModel.loadPokemon(isRefresh = true)
@@ -63,14 +75,56 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun observeViewModel() {
-        viewModel.pokemonList.observe(this, { pokemon ->
-            pokemon?.let {
-                pokemonAdapter.setPokemon(it)
+        viewModel.pokemonList.observe(this) { pokemonList ->
+            pokemonList?.let {
+                this.fullpokimonlist = it
+                val currentQuery = binding.searchBr.query.toString()
+                filterPokemonList(currentQuery)
+            }
+        }
+
+        viewModel.isLoading.observe(this) { isLoading ->
+            binding.progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun setupSearchView() {
+        binding.searchBr.setOnQueryTextListener(object : SearchView.OnQueryTextListener {
+            override fun onQueryTextSubmit(query: String?): Boolean {
+                performSearch()
+                return true
+            }
+
+            override fun onQueryTextChange(newText: String): Boolean {
+                if (newText.isBlank()) {
+                    filterPokemonList("")
+                }
+                return true
             }
         })
+    }
 
-        viewModel.isLoading.observe(this, { isLoading ->
-            binding.progressBar.visibility = if (isLoading) View.VISIBLE else View.GONE
-        })
+    private fun filterPokemonList(query: String) {
+        if (query.isBlank()) {
+            pokemonAdapter.setPokemon(fullpokimonlist)
+        } else {
+            val filteredPokimonList = fullpokimonlist.filter { pokimon ->
+                pokimon.name.contains(query, ignoreCase = true)
+            }
+            pokemonAdapter.setPokemon(filteredPokimonList)
+        }
+    }
+
+    private fun performSearch() {
+        val query = binding.searchBr.query.toString()
+
+        searchJob?.cancel()
+
+        searchJob = lifecycleScope.launch {
+            delay(DEBOUNCE_DELAY)
+
+            filterPokemonList(query)
+            binding.searchBr.clearFocus()
+        }
     }
 }
